@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent history import",
+    "description": "Import a conversation from Codex, Pi, or Claude Code on this computer and continue it in DSH — either with the full context or as a detailed summary."
+  }
+}

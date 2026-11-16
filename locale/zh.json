@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Agent 会话导入",
+    "description": "从本机的 Codex、Pi、Claude Code 导入历史会话到 DSH：可以带着完整上下文继续聊，也可以先生成详细总结再开始新会话。",
+    "detail": "docs/DETAIL.md"
+  }
+}

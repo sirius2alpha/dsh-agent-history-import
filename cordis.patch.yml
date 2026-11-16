@@ -1,0 +1,6 @@
+# Agent history import: one Host row serving the local-history routes and the
+# browser half that adds the import action beside the New-session row.
+- insert:
+    - id: agent-history-import
+      name: 'dsh-agent-history-import'
+      config: {}
