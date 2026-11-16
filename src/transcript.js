@@ -42,8 +42,29 @@ export function buildContinueEvents(transcript, options) {
   const maxToolOutputChars = options.maxToolOutputChars ?? DEFAULT_TOOL_OUTPUT_CHARS
   const title = normalizeTitle(transcript.title ?? '', maxTitleBytes)
   const log = new LogBuilder(options.createId)
-  /** @type {Map<string, { seq: number, step: number, name: string }>} */
-  const openCalls = new Map()
+  // Pair every call with its result up front. The source order is not always
+  // usable: Claude Code can emit another assistant message before the tool
+  // results, and closing that step while a call is still open makes the stored
+  // Session corrupt. Indexing results by call id lets the result enter the log
+  // in the call's own step, and an unmatched call gets one synthetic error
+  // result immediately.
+  /** @type {Map<string, Array<{ text: string, isError: boolean }>>} */
+  const resultsByCallId = new Map()
+  for (const item of transcript.items) {
+    if (item.role !== 'tool') continue
+    const callId = typeof item.callId === 'string' ? item.callId : ''
+    if (callId.length === 0) continue
+    const queue = resultsByCallId.get(callId) ?? []
+    queue.push({ text: typeof item.text === 'string' ? item.text : '', isError: item.isError === true })
+    resultsByCallId.set(callId, queue)
+  }
+  const takeResult = (callId) => {
+    const queue = resultsByCallId.get(callId)
+    if (queue === undefined || queue.length === 0) return undefined
+    const result = queue.shift()
+    if (queue.length === 0) resultsByCallId.delete(callId)
+    return result
+  }
   let turn = 0
   let step = 0
   let assistantInStep = false
@@ -60,21 +81,6 @@ export function buildContinueEvents(transcript, options) {
   }
   const closeTurn = (reason) => {
     if (turn === 0) return
-    // A call whose result never appeared still needs a paired error result, or
-    // the assistant message holds an unanswerable tool call.
-    for (const [callId, call] of openCalls) {
-      log.add({
-        type: 'tool/result',
-        data: {
-          turn,
-          step: call.step,
-          message: toolResultMessage(options.createId(), callId, 'The imported session recorded no result for this tool call.', true),
-        },
-        surfaceOp: 'append',
-        sourceEventSeqs: [call.seq],
-      })
-    }
-    openCalls.clear()
     closeStep()
     log.add({ type: 'turn/end', data: { turn, reason } })
     turn = 0
@@ -145,28 +151,27 @@ export function buildContinueEvents(transcript, options) {
       })
       for (const call of calls) {
         const seq = log.add({ type: 'tool/call', data: { turn, step, callId: call.id, name: call.name, arguments: call.arguments } })
-        openCalls.set(call.id, { seq, step, name: call.name })
+        const result = takeResult(call.id)
+        const body = result === undefined
+          ? 'The imported session recorded no result for this tool call.'
+          : truncateText(result.text, maxToolOutputChars)
+        log.add({
+          type: 'tool/result',
+          data: {
+            turn,
+            step,
+            message: toolResultMessage(options.createId(), call.id, body, result === undefined ? true : result.isError),
+          },
+          surfaceOp: 'append',
+          sourceEventSeqs: [seq],
+        })
       }
       assistantInStep = true
       continue
     }
-    if (item.role === 'tool') {
-      const callId = typeof item.callId === 'string' ? item.callId : ''
-      const call = openCalls.get(callId)
-      if (call === undefined) continue
-      const body = truncateText(typeof item.text === 'string' ? item.text : '', maxToolOutputChars)
-      log.add({
-        type: 'tool/result',
-        data: {
-          turn,
-          step: call.step,
-          message: toolResultMessage(options.createId(), callId, body, item.isError === true),
-        },
-        surfaceOp: 'append',
-        sourceEventSeqs: [call.seq],
-      })
-      openCalls.delete(callId)
-    }
+    // Tool results were paired when their call was emitted, so a source result
+    // item has no further work to do.
+    if (item.role === 'tool') continue
   }
   closeTurn({ kind: 'completed' })
   if (title !== null) addTitle()

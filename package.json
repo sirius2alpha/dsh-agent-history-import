@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-history-import",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Import local Codex, Pi, and Claude Code conversation histories into DSH and continue them",
   "license": "MIT",
   "author": "sirius2alpha",
